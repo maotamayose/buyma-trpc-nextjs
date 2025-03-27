@@ -16,6 +16,7 @@
     "@trpc/client": "^10.44.0",
     "@trpc/react-query": "^10.44.0",
     "@trpc/server": "^10.44.0",
+    "axios": "^1.8.4",
     "next": "15.2.4",
     "react": "18",
     "react-dom": "18",
@@ -23,15 +24,15 @@
     "zod": "^3.22.4"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
     "@types/node": "^20.11.3",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "typescript": "^5.3.3",
     "eslint": "^9",
     "eslint-config-next": "15.2.4",
-    "@eslint/eslintrc": "^3",
+    "prisma": "^5.10.2",
     "tailwindcss": "^4",
-    "@tailwindcss/postcss": "^4",
-    "prisma": "^5.10.2"
+    "typescript": "^5.3.3"
   }
 }
