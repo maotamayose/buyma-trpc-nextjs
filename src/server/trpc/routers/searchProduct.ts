@@ -1,12 +1,12 @@
 import { publicProcedure, router } from "../core";
 import { z } from "zod";
-import { getProductResults } from "@/server/services/productSearch/productService";
+import { getProductResults } from "@/server/services/searchProduct/productService";
 
 export const productRouter = router({
   search: publicProcedure
     .input(
       z.object({
-        brand: z.string(),
+        brand: z.string(),    
         keyword: z.string(),
       })
     )

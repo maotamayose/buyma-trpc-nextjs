@@ -16,4 +16,4 @@ export async function getProductResults(brand: string, keyword: string) {
   const results = await searchProductInOfficialSite(brandUrl, keyword);
 
   return { brand, keyword, officialSite: brandUrl, results };
-}
+} 
