@@ -16,22 +16,27 @@
     "@trpc/client": "^10.44.0",
     "@trpc/react-query": "^10.44.0",
     "@trpc/server": "^10.44.0",
+    "axios": "^1.8.4",
+    "jszip": "^3.10.1",
     "next": "15.2.4",
+    "puppeteer": "^24.4.0",
     "react": "18",
     "react-dom": "18",
     "superjson": "^2.2.1",
     "zod": "^3.22.4"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
+    "@types/cheerio": "^0.22.35",
     "@types/node": "^20.11.3",
+    "@types/puppeteer": "^5.4.7",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "typescript": "^5.3.3",
     "eslint": "^9",
     "eslint-config-next": "15.2.4",
-    "@eslint/eslintrc": "^3",
+    "prisma": "^5.10.2",
     "tailwindcss": "^4",
-    "@tailwindcss/postcss": "^4",
-    "prisma": "^5.10.2"
+    "typescript": "^5.3.3"
   }
 }
