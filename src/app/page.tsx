@@ -39,16 +39,23 @@ export default function Page() {
   // 選択した画像をダウンロードする
   const downloadSelectedImages = () => {
     Array.from(selectedImages).forEach((imageSrc, index) => {
-      // ダウンロード処理を遅延実行（ブラウザのブロックを防ぐため）
-      setTimeout(() => {
-        const link = document.createElement('a');
-        link.href = imageSrc;
-        // ファイル名の作成（URLから抽出）
-        const fileName = imageSrc.split('/').pop()?.split('?')[0] || `image-${index}.jpg`;
-        link.download = fileName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+      setTimeout(async () => {
+        try {
+          const response = await fetch(imageSrc, { mode: 'cors' });
+          const blob = await response.blob();
+          const blobUrl = URL.createObjectURL(blob);
+  
+          const link = document.createElement('a');
+          link.href = blobUrl;
+          const fileName = imageSrc.split('/').pop()?.split('?')[0] || `image-${index}.jpg`;
+          link.download = fileName;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(blobUrl);
+        } catch (err) {
+          console.error(`画像のダウンロードに失敗: ${imageSrc}`, err);
+        }
       }, index * 300);
     });
   };
