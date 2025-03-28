@@ -17,6 +17,7 @@
     "@trpc/react-query": "^10.44.0",
     "@trpc/server": "^10.44.0",
     "axios": "^1.8.4",
+    "jszip": "^3.10.1",
     "next": "15.2.4",
     "puppeteer": "^24.4.0",
     "react": "18",

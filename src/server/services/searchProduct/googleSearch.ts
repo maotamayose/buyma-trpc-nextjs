@@ -99,7 +99,7 @@ class GoogleSearchClient {
   }
 
   async searchProductInOfficialSite(siteUrl: string, keyword: string): Promise<string[]> {
-    const query = `site:${siteUrl} ${keyword}`;
+    const query = `site:${siteUrl} inurl:${keyword}`;
     const result = await this.search(query);
     
     return (result.items || [])

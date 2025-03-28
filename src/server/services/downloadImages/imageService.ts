@@ -1,4 +1,5 @@
 import axios from "axios";
+import puppeteer, { Page, Browser } from "puppeteer";
 
 /** 画像情報 */
 interface ImageInfo {
@@ -9,46 +10,125 @@ interface ImageInfo {
 }
 
 /**
- * 動的スクレイピング：Puppeteerでレンダリング後のHTMLから、上記と同様に画像URLを抽出する
+ * ランダムな遅延を発生させる関数
+ * @param min 最小ミリ秒
+ * @param max 最大ミリ秒
  */
-async function dynamicScrape(url: string): Promise<string[]> {
-  const imageUrls = new Set<string>();
-  try {
-    const puppeteer = await import("puppeteer");
+async function randomDelay(
+  min: number = 500,
+  max: number = 1500
+): Promise<void> {
+  const delay = Math.floor(Math.random() * (max - min + 1)) + min;
+  return new Promise((resolve) => setTimeout(resolve, delay));
+}
 
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+/**
+ * ページを自動スクロールする関数
+ * @param page - Puppeteer の Page インスタンス
+ */
+async function autoScroll(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    await new Promise<void>((resolve) => {
+      let totalHeight = 0;
+      const distance = 300;
+      const timer = setInterval(() => {
+        const scrollHeight = document.body.scrollHeight;
+        window.scrollBy(0, distance);
+        totalHeight += distance;
+        if (totalHeight >= scrollHeight) {
+          clearInterval(timer);
+          resolve();
+        }
+      }, 200);
+    });
+  });
+}
+
+/**
+ * サムネイルをクリックしてメイン画像のURLを取得する関数
+ */
+async function clickThumbnailsAndGetMainImages(
+  page: Page,
+  thumbnailSelector: string,
+  mainImageSelector: string,
+  waitTime = 1500
+): Promise<string[]> {
+  const results = new Set<string>();
+  const thumbnails = await page.$$(thumbnailSelector);
+  for (const thumb of thumbnails) {
+    await thumb.click();
+    // ランダムな遅延を挟む
+    await randomDelay(waitTime, waitTime + 500);
+    const mainSrc = await page.evaluate((selector) => {
+      const mainImg = document.querySelector(
+        selector
+      ) as HTMLImageElement | null;
+      if (mainImg) {
+        return (
+          mainImg.getAttribute("src") ||
+          mainImg.getAttribute("data-src") ||
+          mainImg.getAttribute("data-lazy")
+        );
+      }
+      return null;
+    }, mainImageSelector);
+    if (mainSrc) {
+      results.add(mainSrc);
+    }
+  }
+  return Array.from(results);
+}
+
+/**
+ * 動的スクレイピングを行い、画像URLを取得する関数
+ */
+export async function dynamicScrape(url: string): Promise<string[]> {
+  const imageUrls = new Set<string>();
+  let browser: Browser | null = null;
+  try {
+    // ヘッドレスモードを無効化し、人間らしい振る舞いをシミュレートするためのオプションを追加
+    browser = await puppeteer.launch({
+      headless: false,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-blink-features=AutomationControlled",
+      ],
+    });
+    const page: Page = await browser.newPage();
+
+    // 一般的なブラウザのUser-Agentを設定
+    const USER_AGENT =
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+      "(KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36";
+    await page.setUserAgent(USER_AGENT);
+
+    // navigator.webdriver を false に上書き（新規ドキュメント毎に適用）
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, "webdriver", {
+        get: () => false,
+      });
     });
 
-    const page = await browser.newPage();
-
-    // 画像リソースのabortはコメントアウトまたは削除して、画像読み込みを許可する
-    // await page.setRequestInterception(true);
-    // page.on('request', (request) => {
-    //   if (request.resourceType() === 'image' || request.resourceType() === 'media') {
-    //     request.abort();
-    //   } else {
-    //     request.continue();
-    //   }
-    // });
-
-    // ページ全体の読み込みを待つ
     await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
 
-    // 自動スクロールでlazy loadingされた画像を読み込む
+    // 自然なスクロールとランダムな遅延
     await autoScroll(page);
+    await randomDelay(1500, 2500);
 
-    const dynamicUrls: string[] = await page.evaluate(() => {
+    const urls: string[] = await page.evaluate(() => {
       const urls = new Set<string>();
 
-      // <img> タグのsrc, data-src, data-lazy属性を取得
+      // <img> タグ
       document.querySelectorAll("img").forEach((img) => {
-        const src = img.getAttribute("src") || img.getAttribute("data-src") || img.getAttribute("data-lazy");
+        const src =
+          img.getAttribute("src") ||
+          img.getAttribute("data-src") ||
+          img.getAttribute("data-lazy");
         if (src) urls.add(src);
       });
 
-      // <picture> 内の <source> タグのsrcset属性を取得
+      // <picture> 内の <source> タグ
       document.querySelectorAll("picture source").forEach((source) => {
         const srcset = source.getAttribute("srcset");
         if (srcset) {
@@ -59,13 +139,13 @@ async function dynamicScrape(url: string): Promise<string[]> {
         }
       });
 
-      // <meta property="og:image"> タグ
+      // og:image タグ
       document.querySelectorAll('meta[property="og:image"]').forEach((meta) => {
         const content = meta.getAttribute("content");
         if (content) urls.add(content);
       });
 
-      // CSSのbackground-imageとして設定されている画像も取得
+      // CSS background-image
       document.querySelectorAll("*").forEach((el) => {
         const style = window.getComputedStyle(el);
         const bgImage = style.getPropertyValue("background-image");
@@ -79,36 +159,33 @@ async function dynamicScrape(url: string): Promise<string[]> {
 
       return Array.from(urls);
     });
+    urls.forEach((u) => imageUrls.add(u));
 
-    dynamicUrls.forEach((u) => imageUrls.add(u));
+    // サムネイルクリック処理の例（セレクタはサイトに合わせて変更してください）
+    const thumbnailSelector = 'div[data-testid^="Thumbnail-"] img';
+    const mainImageSelector = 'div[class*="carousel"] img';
+    const clickedImages = await clickThumbnailsAndGetMainImages(
+      page,
+      thumbnailSelector,
+      mainImageSelector,
+      1500
+    );
+    clickedImages.forEach((u) => imageUrls.add(u));
+
     await browser.close();
   } catch (error) {
     console.error("動的スクレイピングエラー:", error);
+    if (browser) {
+      await browser.close();
+    }
   }
   return Array.from(imageUrls);
 }
 
-// 自動スクロールのヘルパー関数
-async function autoScroll(page: any) {
-  await page.evaluate(async () => {
-    await new Promise<void>((resolve) => {
-      let totalHeight = 0;
-      const distance = 100;
-      const timer = setInterval(() => {
-        const scrollHeight = document.body.scrollHeight;
-        window.scrollBy(0, distance);
-        totalHeight += distance;
-        if (totalHeight >= scrollHeight) {
-          clearInterval(timer);
-          resolve();
-        }
-      }, 100);
-    });
-  });
-}
 /**
  * 画像URLの重複・類似フィルタリング
- * クエリパラメータを除去したベースURLをキーにして、同一の画像と思われるものは高解像度と思われるURLを優先して残す
+ * クエリパラメータを除去したベースURLをキーにして、同一の画像と思われるものは
+ * 高解像度と思われるURLを優先して残す
  */
 function filterSimilarUrls(urls: string[]): string[] {
   const stripQuery = (url: string): string => url.split("?")[0];
@@ -116,7 +193,6 @@ function filterSimilarUrls(urls: string[]): string[] {
 
   for (const url of urls) {
     const base = stripQuery(url);
-    // 既に同じベースURLがある場合、文字数が長いほう（＝追加情報がある＝高解像度の可能性がある）を採用
     if (map.has(base)) {
       const existing = map.get(base)!;
       if (url.length > existing.length) {
