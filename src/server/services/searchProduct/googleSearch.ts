@@ -100,8 +100,10 @@ class GoogleSearchClient {
 
   async searchProductInOfficialSite(siteUrl: string, keyword: string): Promise<string[]> {
     const query = `site:${siteUrl} inurl:${keyword}`;
-    const result = await this.search(query);
-    
+    const queryAdd = `site:${siteUrl} ${keyword}`;
+    let result = await this.search(query);
+    const additionalResult = await this.search(queryAdd);
+    result.items = [...(result.items || []), ...(additionalResult.items || [])];
     return (result.items || [])
       .slice(0, 5)
       .map(item => item.link);

@@ -24,7 +24,7 @@ async function randomDelay(
 
 /**
  * ページを自動スクロールする関数
- * @param page - Puppeteer の Page インスタンス
+ * @param page Puppeteer の Page インスタンス
  */
 async function autoScroll(page: Page): Promise<void> {
   await page.evaluate(async () => {
@@ -45,65 +45,34 @@ async function autoScroll(page: Page): Promise<void> {
 }
 
 /**
- * サムネイルをクリックしてメイン画像のURLを取得する関数
- */
-async function clickThumbnailsAndGetMainImages(
-  page: Page,
-  thumbnailSelector: string,
-  mainImageSelector: string,
-  waitTime = 1500
-): Promise<string[]> {
-  const results = new Set<string>();
-  const thumbnails = await page.$$(thumbnailSelector);
-  for (const thumb of thumbnails) {
-    await thumb.click();
-    // ランダムな遅延を挟む
-    await randomDelay(waitTime, waitTime + 500);
-    const mainSrc = await page.evaluate((selector) => {
-      const mainImg = document.querySelector(
-        selector
-      ) as HTMLImageElement | null;
-      if (mainImg) {
-        return (
-          mainImg.getAttribute("src") ||
-          mainImg.getAttribute("data-src") ||
-          mainImg.getAttribute("data-lazy")
-        );
-      }
-      return null;
-    }, mainImageSelector);
-    if (mainSrc) {
-      results.add(mainSrc);
-    }
-  }
-  return Array.from(results);
-}
-
-/**
- * 動的スクレイピングを行い、画像URLを取得する関数
+ * 動的スクレイピングを行い、画像URLを取得する汎用関数
  */
 export async function dynamicScrape(url: string): Promise<string[]> {
   const imageUrls = new Set<string>();
   let browser: Browser | null = null;
+
   try {
-    // ヘッドレスモードを無効化し、人間らしい振る舞いをシミュレートするためのオプションを追加
     browser = await puppeteer.launch({
-      headless: false,
+      headless: false, // ヘッドレスモードを無効にして通常ブラウザに近づける
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-blink-features=AutomationControlled",
+        "--start-fullscreen",
       ],
     });
     const page: Page = await browser.newPage();
-
-    // 一般的なブラウザのUser-Agentを設定
+    await page.setViewport({
+      width: 1920, // 画面幅（例）
+      height: 1080, // 画面高さ（例）
+    });
+    // 一般的なUser-Agentを設定
     const USER_AGENT =
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
       "(KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36";
     await page.setUserAgent(USER_AGENT);
 
-    // navigator.webdriver を false に上書き（新規ドキュメント毎に適用）
+    // navigator.webdriver を false に上書き
     await page.evaluateOnNewDocument(() => {
       Object.defineProperty(navigator, "webdriver", {
         get: () => false,
@@ -111,11 +80,10 @@ export async function dynamicScrape(url: string): Promise<string[]> {
     });
 
     await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
-
-    // 自然なスクロールとランダムな遅延
     await autoScroll(page);
     await randomDelay(1500, 2500);
 
+    // DOM内の各種画像要素からURLを取得
     const urls: string[] = await page.evaluate(() => {
       const urls = new Set<string>();
 
@@ -128,7 +96,7 @@ export async function dynamicScrape(url: string): Promise<string[]> {
         if (src) urls.add(src);
       });
 
-      // <picture> 内の <source> タグ
+      // <picture> タグ内の <source> 要素
       document.querySelectorAll("picture source").forEach((source) => {
         const srcset = source.getAttribute("srcset");
         if (srcset) {
@@ -145,32 +113,19 @@ export async function dynamicScrape(url: string): Promise<string[]> {
         if (content) urls.add(content);
       });
 
-      // CSS background-image
+      // CSS の background-image
       document.querySelectorAll("*").forEach((el) => {
         const style = window.getComputedStyle(el);
         const bgImage = style.getPropertyValue("background-image");
         if (bgImage && bgImage !== "none") {
           const match = bgImage.match(/url\(["']?(.*?)["']?\)/);
-          if (match && match[1]) {
-            urls.add(match[1]);
-          }
+          if (match && match[1]) urls.add(match[1]);
         }
       });
 
       return Array.from(urls);
     });
     urls.forEach((u) => imageUrls.add(u));
-
-    // サムネイルクリック処理の例（セレクタはサイトに合わせて変更してください）
-    const thumbnailSelector = 'div[data-testid^="Thumbnail-"] img';
-    const mainImageSelector = 'div[class*="carousel"] img';
-    const clickedImages = await clickThumbnailsAndGetMainImages(
-      page,
-      thumbnailSelector,
-      mainImageSelector,
-      1500
-    );
-    clickedImages.forEach((u) => imageUrls.add(u));
 
     await browser.close();
   } catch (error) {
@@ -179,13 +134,14 @@ export async function dynamicScrape(url: string): Promise<string[]> {
       await browser.close();
     }
   }
+
   return Array.from(imageUrls);
 }
 
 /**
  * 画像URLの重複・類似フィルタリング
- * クエリパラメータを除去したベースURLをキーにして、同一の画像と思われるものは
- * 高解像度と思われるURLを優先して残す
+ * URLのクエリパラメータを除去したベースURLをキーにして、同一画像と思われるものは
+ * 高解像度とみなされるURLを優先して残す
  */
 function filterSimilarUrls(urls: string[]): string[] {
   const stripQuery = (url: string): string => url.split("?")[0];
@@ -237,7 +193,7 @@ async function filterValidUrls(urls: string[]): Promise<string[]> {
 }
 
 /**
- * URLから画像を取得し、ImageInfo 型の配列として返す
+ * URLから画像を取得し、ImageInfo 型の配列として返す関数
  * ① 動的スクレイピングのみ
  * ② 取得したURLの重複・類似フィルタリング、③ 画像存在確認を行い、最終結果を整形して返す
  */

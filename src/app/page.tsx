@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "@/utils/trpc";
 import JSZip from "jszip";
 
@@ -9,6 +9,7 @@ export default function Page() {
   const [selectedUrl, setSelectedUrl] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
+  const [hasCrawled, setHasCrawled] = useState(false); // 一度だけ実行するためのフラグ
 
   const search = trpc.product.search.useQuery(input, {
     enabled: false,
@@ -20,11 +21,15 @@ export default function Page() {
     {
       enabled: !!selectedUrl,
       retry: 1,
+      refetchOnWindowFocus: false,
+      refetchOnMount: false,
+      refetchInterval: false, // または 0
       onSettled: () => {
         setIsLoadingMore(false);
       },
     }
   );
+  
 
   // 画像の選択状態を切り替える
   const toggleImageSelection = (imageSrc: string) => {
@@ -52,15 +57,28 @@ export default function Page() {
   const downloadSelectedImagesAsZip = async () => {
     const zip = new JSZip();
     let index = 0;
+    // ファイル名重複対策
+    const fileNameCount: Record<string, number> = {};
+
     for (const imageSrc of Array.from(selectedImages)) {
       try {
         const response = await fetch(imageSrc, { mode: "cors" });
         const blob = await response.blob();
         // URLからファイル名を取得（クエリパラメータは除去）
-        let fileName = imageSrc.split("/").pop()?.split("?")[0] || "";
-        // 拡張子がなければ Blob の MIME タイプから補完
+        let fileName =
+          imageSrc.split("/").pop()?.split("?")[0] || `image-${index}`;
         if (!fileName.includes(".")) {
           fileName = `image-${index}${getExtensionFromMime(blob.type)}`;
+        }
+        // 重複があれば番号付与
+        if (fileNameCount[fileName] !== undefined) {
+          fileNameCount[fileName]++;
+          const dotIndex = fileName.lastIndexOf(".");
+          const base = fileName.substring(0, dotIndex);
+          const ext = fileName.substring(dotIndex);
+          fileName = `${base}-${fileNameCount[fileName]}${ext}`;
+        } else {
+          fileNameCount[fileName] = 0;
         }
         zip.file(fileName, blob);
         index++;
@@ -68,7 +86,6 @@ export default function Page() {
         console.error(`画像のダウンロードに失敗: ${imageSrc}`, err);
       }
     }
-    // zipファイルを生成
     const zipBlob = await zip.generateAsync({ type: "blob" });
     const blobUrl = URL.createObjectURL(zipBlob);
     const link = document.createElement("a");
@@ -80,62 +97,93 @@ export default function Page() {
     URL.revokeObjectURL(blobUrl);
   };
 
+  // ボタンクリックで一度だけクローリングを実行する（再実行する場合はリセットボタンから）
+  const handleSearch = () => {
+    if (!input.brand || !input.keyword) return;
+    if (!hasCrawled) {
+      search.refetch();
+      setHasCrawled(true);
+    } else {
+      alert("既にクローリング済みです。リセットして再実行してください。");
+    }
+  };
+
+  // リセット処理（再検索可能にする）
+  const handleReset = () => {
+    setHasCrawled(false);
+    setSelectedUrl(null);
+    setSelectedImages(new Set());
+  };
+
   return (
-    <main className="min-h-screen bg-gray-50">
-      <div className="container mx-auto py-8 px-4">
-        <h1 className="text-3xl font-bold text-center text-gray-800 mb-8">
+    <main className="min-h-screen bg-gray-100">
+      <div className="container mx-auto py-12 px-6">
+        <h1 className="text-4xl font-bold text-center text-gray-900 mb-10">
           商品画像スクレイパー
         </h1>
         <form
-          className="max-w-lg mx-auto bg-white p-6 rounded-lg shadow-md space-y-4"
+          className="max-w-xl mx-auto bg-white p-8 rounded-xl shadow-lg space-y-6"
           onSubmit={(e) => {
             e.preventDefault();
-            if (input.brand && input.keyword) search.refetch();
+            handleSearch();
           }}
         >
-          <div className="flex flex-col gap-2">
-            <label className="text-gray-700 font-medium">ブランド名</label>
+          <div>
+            <label className="block text-gray-700 font-semibold mb-2">
+              ブランド名
+            </label>
             <input
+              type="text"
               value={input.brand}
               onChange={(e) =>
                 setInput((p) => ({ ...p, brand: e.target.value }))
               }
-              placeholder="ブランド名"
-              className="w-full p-3 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-400"
+              placeholder="例: Nike"
+              className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
           </div>
-          <div className="flex flex-col gap-2">
-            <label className="text-gray-700 font-medium">キーワード</label>
+          <div>
+            <label className="block text-gray-700 font-semibold mb-2">
+              キーワード
+            </label>
             <input
+              type="text"
               value={input.keyword}
               onChange={(e) =>
                 setInput((p) => ({ ...p, keyword: e.target.value }))
               }
-              placeholder="キーワード"
-              className="w-full p-3 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-400"
+              placeholder="例: Air Pegasus 2005"
+              className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
           </div>
-          <button
-            disabled={search.isFetching || !input.brand || !input.keyword}
-            className="w-full py-3 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 transition-colors"
-          >
-            {search.isFetching ? "検索中..." : "検索"}
-          </button>
-
+          <div className="flex justify-between gap-4">
+            <button
+              type="submit"
+              disabled={search.isFetching || !input.brand || !input.keyword}
+              className="w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              {search.isFetching ? "検索中..." : "検索"}
+            </button>
+            <button
+              type="button"
+              onClick={handleReset}
+              className="w-full py-3 bg-gray-400 text-white rounded-lg hover:bg-gray-500 transition-colors"
+            >
+              リセット
+            </button>
+          </div>
           {search.isError && (
             <p className="text-red-500 text-center">
-              エラーが発生しました:{" "}
-              {search.error?.message || "不明なエラー"}
+              エラーが発生しました: {search.error?.message || "不明なエラー"}
             </p>
           )}
-
           {search.data?.officialSite && (
-            <div className="mb-4 text-center">
+            <div className="text-center">
               <a
                 href={search.data.officialSite}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-blue-500 hover:underline font-semibold"
+                className="text-blue-600 hover:underline font-semibold"
               >
                 公式サイト: {search.data.officialSite}
               </a>
@@ -146,31 +194,35 @@ export default function Page() {
                 )}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-blue-500 hover:underline mt-2 inline-block"
+                className="text-blue-600 hover:underline mt-2 inline-block"
               >
-                下に何も出てこなかったらこちらをクリック！！
+                こちらをクリックしても検索できます
               </a>
             </div>
           )}
-
-          {search.data?.results?.map((url: string) => (
-            <div key={url} className="flex items-center justify-between border-b py-2">
+          {search.data?.results?.map((url: string, index: number) => (
+            <div
+              key={`${url}-${index}`}
+              className="flex items-center justify-between border-b py-2"
+            >
               <a
                 href={url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-blue-500 hover:underline truncate max-w-[70%]"
+                className="text-blue-600 hover:underline truncate max-w-[70%]"
               >
                 {url}
               </a>
               <button
+                type="button"
                 onClick={() => {
+                  if (selectedUrl === url) return;
                   setSelectedUrl(url);
                   setIsLoadingMore(true);
-                  setSelectedImages(new Set()); // 新しい画像を表示する際に選択をリセット
+                  setSelectedImages(new Set());
                 }}
                 disabled={isLoadingMore}
-                className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50 transition-colors"
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
               >
                 画像を表示
               </button>
@@ -180,20 +232,17 @@ export default function Page() {
       </div>
 
       {selectedUrl && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white p-6 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-auto shadow-xl">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-2xl font-bold text-gray-800">
-                商品画像
-              </h2>
-              <div className="flex items-center space-x-3">
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-6 z-50">
+          <div className="bg-white p-8 rounded-xl max-w-4xl w-full max-h-[90vh] overflow-auto shadow-2xl">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-3xl font-bold text-gray-800">商品画像</h2>
+              <div className="flex items-center space-x-4">
                 {selectedImages.size > 0 && (
                   <button
                     onClick={downloadSelectedImagesAsZip}
-                    className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+                    className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                   >
-                    選択した画像をZipでダウンロード (
-                    {selectedImages.size})
+                    選択した画像をZipでダウンロード ({selectedImages.size})
                   </button>
                 )}
                 <button
@@ -206,13 +255,13 @@ export default function Page() {
             </div>
 
             {images.isLoading || isLoadingMore ? (
-              <div className="flex flex-col items-center justify-center py-8">
-                <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+              <div className="flex flex-col items-center justify-center py-10">
+                <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
                 <p className="mt-4 text-gray-600">画像を読み込み中...</p>
               </div>
             ) : images.isError ? (
-              <div className="text-center py-8">
-                <p className="text-red-500 text-lg font-bold">
+              <div className="text-center py-10">
+                <p className="text-red-500 text-xl font-bold">
                   画像の読み込みに失敗しました
                 </p>
                 <p className="mt-2 text-gray-600">
@@ -223,25 +272,25 @@ export default function Page() {
                     setIsLoadingMore(true);
                     images.refetch();
                   }}
-                  className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+                  className="mt-4 px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                 >
                   再試行
                 </button>
               </div>
             ) : images.data?.images.length === 0 ? (
-              <div className="text-center py-8">
+              <div className="text-center py-10">
                 <p className="text-gray-600">画像が見つかりませんでした</p>
               </div>
             ) : (
               <>
-                <div className="mb-4 flex justify-between items-center">
-                  <div className="text-gray-700">
+                <div className="mb-6 flex justify-between items-center">
+                  <div className="text-gray-700 text-lg">
                     <span className="font-bold">
                       {images.data?.images.length}
                     </span>{" "}
                     枚の画像が見つかりました
                   </div>
-                  <div className="flex space-x-2">
+                  <div className="flex space-x-3">
                     <button
                       onClick={() =>
                         setSelectedImages(
@@ -250,13 +299,13 @@ export default function Page() {
                           )
                         )
                       }
-                      className="px-3 py-1 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 transition-colors text-sm"
+                      className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors text-sm"
                     >
                       すべて選択
                     </button>
                     <button
                       onClick={() => setSelectedImages(new Set())}
-                      className="px-3 py-1 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 transition-colors text-sm"
+                      className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors text-sm"
                     >
                       選択解除
                     </button>
@@ -265,8 +314,8 @@ export default function Page() {
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   {images.data?.images.map((image, index) => (
                     <div
-                      key={index}
-                      className={`border rounded overflow-hidden transition-all hover:shadow-xl ${
+                      key={`${image.src}-${index}`}
+                      className={`border rounded-lg overflow-hidden transition-transform hover:scale-105 hover:shadow-2xl cursor-pointer ${
                         selectedImages.has(image.src)
                           ? "ring-2 ring-blue-500"
                           : ""
@@ -279,7 +328,7 @@ export default function Page() {
                           alt={image.alt || `商品画像 ${index + 1}`}
                           width={image.width}
                           height={image.height}
-                          className="w-full h-auto cursor-pointer"
+                          className="w-full h-auto"
                           loading="lazy"
                         />
                         <div className="absolute top-2 left-2">
@@ -291,13 +340,13 @@ export default function Page() {
                           />
                         </div>
                       </div>
-                      <div className="p-2 text-sm text-gray-600 break-all flex justify-between items-center">
+                      <div className="p-3 text-sm text-gray-600 break-all flex justify-between items-center">
                         <span>画像 {index + 1}</span>
                         <a
                           href={image.src}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-blue-500 hover:underline"
+                          className="text-blue-600 hover:underline"
                           onClick={(e) => e.stopPropagation()}
                         >
                           原寸で表示
